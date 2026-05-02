@@ -95,6 +95,21 @@
 								<input type="checkbox" name="iiab_gateway_enabled" id="iiab_gateway_enabled">Check to Enable traffic from LAN to WAN
 							</label>
 						</div>
+						<h3>SSL / HTTPS (Let's Encrypt)</h3>
+						<p>Enable automated HTTPS using a free Let's Encrypt certificate. Requires a public domain name pointing to this server.</p>
+						<div class="checkbox">
+							<label>
+								<input type="checkbox" name="iiab_ssl_enabled" id="iiab_ssl_enabled">Enable SSL/HTTPS
+							</label>
+						</div>
+						<div class="form-group" id="ssl_domain_group">
+							<label for="iiab_ssl_domain">Domain Name</label>
+							<input type="text" class="form-control" name="iiab_ssl_domain" id="iiab_ssl_domain" placeholder="e.g. example.com">
+						</div>
+						<div class="form-group" id="ssl_email_group">
+							<label for="iiab_ssl_certbot_email">Certbot Email (for renewal notices)</label>
+							<input type="email" class="form-control" name="iiab_ssl_certbot_email" id="iiab_ssl_certbot_email" placeholder="e.g. you@email.com">
+						</div>
 					</form>
 				</div> <!--  network pane -->
 				<!-- MOVE THIS DOWN TO 2ND TO END OR JUST IN MENU  -->
