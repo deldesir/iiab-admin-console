@@ -1,8 +1,9 @@
 // zim_functions.js
-// copyright 2018-2025 Tim Moody
+// copyright 2018-2026 Tim Moody
 // Author: Tim Moody <tim(at)timmoody(dot)com>
 
 // Install Content functions are at around 750
+var missingZimLangCodes = []; // used to track missing language codes in zim catalog
 
   function instZim(zim_id)
   {
@@ -572,6 +573,7 @@ function sortZimLangs(){
   for (var i in zimLangs){
     if (langCodes[zimLangs[i]] === undefined){ // for now ignore languages we don't know
       consoleLog('Language code ' + zimLangs[i] + ' not in langCodes.');
+      missingZimLangCodes.push(zimLangs[i]);
       continue;
     }
     var attr = {};
