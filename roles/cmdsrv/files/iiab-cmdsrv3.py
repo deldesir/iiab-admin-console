@@ -735,6 +735,7 @@ def cmd_handler(cmd_msg):
         "SET-CONF": {"funct": set_config_vars, "inet_req": False},
         "GET-RPI-STATE": {"funct": get_rpi_state, "inet_req": False},
         "GET-MEM-INFO": {"funct": get_mem_info, "inet_req": False},
+        "GET-HW-INFO": {"funct": get_hw_info, "inet_req": False},
         "GET-SPACE-AVAIL": {"funct": get_space_avail, "inet_req": False},
         "GET-STORAGE-INFO": {"funct": get_storage_info_lite, "inet_req": False},
         "GET-EXTDEV-INFO": {"funct": get_external_device_info, "inet_req": False},
@@ -1160,10 +1161,6 @@ def get_install_vars(cmd_info):
     resp = json.dumps(effective_vars)
     return (resp)
 
-def OBSOL_get_install_vars_init():
-    # assumes default vars already read
-    read_iiab_local_vars() # any errors are raised
-
 def get_iiab_ini(cmd_info):
     read_iiab_ini_file()
     resp = json.dumps(iiab_ini)
@@ -1188,6 +1185,14 @@ def get_mem_info(cmd_info):
     outp = subproc_check_output(["/usr/bin/free", "-h"])
     json_outp = json_array("system_memory", outp)
     return (json_outp)
+
+def get_hw_info(cmd_info):
+    try:
+        outp = subproc_check_output(["/usr/bin/lshw", "-json", "-quiet", "-sanitize"])
+        resp = '{"hw_info": ' + outp + '}'
+    except Exception:
+        resp = cmd_error(cmd_info['cmd'], "Unable to read hardware info")
+    return (resp)
 
 def get_space_avail(cmd_info):
     space_avail = adm.calc_space_avail()
@@ -1532,7 +1537,7 @@ def set_nmcli_connection(cmd, connect_wifi_ssid, connect_wifi_bssid, connect_wif
     psk = wpa_psk(connect_wifi_ssid, connect_wifi_password)
     cmdstr = 'nmcli device wifi connect ' + connect_wifi_bssid + ' password '  + psk
 
-    print(cmdstr)
+    # print(cmdstr)
 
     try:
         rc = adm.subproc_run(cmdstr)
@@ -1551,68 +1556,6 @@ def set_nmcli_connection(cmd, connect_wifi_ssid, connect_wifi_bssid, connect_wif
     if restart_hotspot():
         # return cmd_success(cmd)
         return resp
-    else:
-        return cmd_error(cmd=cmd, msg='Error Restarting Hotspot.')
-
-def set_nmcli_connection_OLD(cmd, connect_wifi_ssid, connect_wifi_password):
-    WIFI_DEV = 'wlan0' # get from somewhere, but this is rpi only
-    current_wifi_connection = None
-    add_flag = True
-    con_name = connect_wifi_ssid.replace(' ', '_')
-
-    cmdstr = 'nmcli -t -f device,name,type connection show'
-    rc = adm.subproc_run(cmdstr)
-    dev_arr = rc.stdout.split('\n')[:-1]
-
-    for devstr in dev_arr:
-        props = devstr.split(':')
-        if props[2] != '802-11-wireless':
-            continue
-        if props[0] == WIFI_DEV:
-            current_wifi_connection = props[1]
-        if props[1] == con_name:
-            add_flag = False
-
-    if connect_wifi_ssid == current_wifi_connection:
-        return cmd_error(cmd=cmd, msg='Already connected to ' + connect_wifi_ssid + '.')
-
-    if current_wifi_connection: # already connected to another router
-        rc = adm.subproc_run('nmcli device disconnect ' + WIFI_DEV)
-        if rc.returncode != 0:
-            return cmd_error(cmd=cmd, msg='Error disconnecting from ' + current_wifi_connection + '.')
-
-    psk = wpa_psk(connect_wifi_ssid, connect_wifi_password)
-
-    if add_flag:
-        cmdstr = 'nmcli con add type wifi con-name ' + con_name + ' ssid "' + connect_wifi_ssid + '" '
-        cmdstr += 'wifi-sec.auth-alg open wifi-sec.key-mgmt wpa-psk wifi-sec.psk ' + psk
-    else:
-        cmdstr = 'nmcli con modify ' + con_name + ' wifi-sec.psk '  + psk
-
-    print(cmdstr)
-
-    try:
-        rc = adm.subproc_run(cmdstr)
-        if rc.returncode != 0:
-            return cmd_error(cmd=cmd, msg='Error Connecting to Router.')
-    except:
-        return cmd_error(cmd=cmd, msg='Error Connecting to Router.')
-
-    try:
-        rc = adm.subproc_run('nmcli con up ' + con_name)
-        if rc.returncode == 0:
-            resp = cmd_success(cmd)
-            return resp
-        elif rc.returncode == 4:
-            resp = cmd_error(cmd=cmd, msg='Unable to Connect. Check credentials.')
-        elif rc.returncode == 10:
-            resp = cmd_error(cmd=cmd, msg='Unable to Find Router.')
-        else:
-            resp = cmd_error(cmd=cmd, msg='Unable to Connect.')
-    except:
-        resp = cmd_error(cmd=cmd, msg='Error Connecting to Router.')
-    if restart_hotspot():
-        return cmd_success(cmd)
     else:
         return cmd_error(cmd=cmd, msg='Error Restarting Hotspot.')
 
@@ -1724,7 +1667,7 @@ def remove_wifi_connection_params_nm(cmd_info):
         for devstr in dev_arr:
             props = devstr.split(':')
             if props[0] == '802-11-wireless':
-                cmdstr = 'nmcli con delete ' + props[1]
+                cmdstr = 'nmcli con delete ' + shlex.quote(props[1])
                 rc = adm.subproc_run(cmdstr)
                 if rc.returncode != 0:
                     return cmd_error(cmd=cmd, msg='Error removing Router Connection ' + props[1] + '.')
@@ -1931,44 +1874,6 @@ def get_ext_zim_catalog(dev_name):
     except: #skip things that don't work
         pass
     usb_catalog = read_library_xml(kiwix_library_xml_tmp)
-    return (usb_catalog)
-
-def get_ext_zim_catalog2(dev_name): # keeping for the moment, but not used
-    kiwix_manage = iiab_base + "/kiwix/bin/kiwix-manage"
-    kiwix_library_xml_tmp = "/tmp/library.xml"
-    kiwix_exclude_attr = ["favicon"]
-    iiab_zim_path = dev_name + zim_dir
-    content = iiab_zim_path + "/content/"
-    index = iiab_zim_path + "/index/"
-    usb_catalog = {}
-
-    files_processed = {}
-    flist = os.listdir(content)
-    flist.sort()
-    for filename in flist:
-        zimpos = filename.find(".zim")
-        if zimpos != -1:
-            filename = filename[:zimpos]
-            if filename not in files_processed:
-                files_processed[filename] = True
-                zimname = content + filename + ".zim"
-                zimidx = index + filename + ".zim.idx"
-                command = kiwix_manage + " " + kiwix_library_xml_tmp + " add " + zimname
-                if os.path.isdir (zimidx): # only declare index if exists (could be embedded)
-                    command += " -i " + zimidx
-                #print command
-                args = shlex.split(command)
-                try:
-                    outp = subproc_check_output(args)
-                except: #skip things that don't work
-                    #print 'skipping ' + filename
-                    pass
-
-    usb_catalog = read_library_xml(kiwix_library_xml_tmp, kiwix_exclude_attr)
-    try:
-        os.remove(kiwix_library_xml_tmp)
-    except OSError:
-        pass
     return (usb_catalog)
 
 def umount_usb(cmd_info):
@@ -2187,9 +2092,9 @@ def get_zim_stat(cmd_info):
     resp = json.dumps(all_zims)
     return (resp)
 
-def read_library_xml(lib_xml_file, kiwix_exclude_attr=[""]):
-    kiwix_exclude_attr.append("id") # don't include id
-    kiwix_exclude_attr.append("favicon") # don't include large favicon
+def read_library_xml(lib_xml_file, kiwix_exclude_attr=["favicon"]):
+    excluded_attr = {'id'} # use a set and never include the key
+    excluded_attr.update(kiwix_exclude_attr)
     zims_installed = {}
     try:
         tree = ET.parse(lib_xml_file)
@@ -2201,7 +2106,7 @@ def read_library_xml(lib_xml_file, kiwix_exclude_attr=[""]):
             if 'id' in child.attrib:
                 id = child.attrib['id']
                 for attr in child.attrib:
-                    if attr not in kiwix_exclude_attr:
+                    if attr not in excluded_attr:
                         attributes[attr] = child.attrib[attr] # copy if not id or in exclusion list
                 zims_installed[id] = attributes
     except IOError:
@@ -2557,7 +2462,7 @@ def install_presets(cmd_info):
     zim_cmd_info = cmd_info
     for ref in perma_ref_idx:
         if perma_ref_idx[ref]['id'] in zims_installed:
-            print('Skipping already installed ' + ref)
+            log(syslog.LOG_INFO, 'Skipping already installed ' + ref)
             continue # skip already installed zims
         zim_cmd_info['cmd'] ='INST-ZIM'
         zim_cmd_info['cmd_args'] = {'zim_id': perma_ref_idx[ref]['id']}
@@ -2656,7 +2561,7 @@ def pseudo_cmd_handler(cmd_info, check_dup=True):
     if check_dup: # ansible does it's own check
         dup_cmd = next((job_id for job_id, active_cmd_msg in list(active_commands.items()) if active_cmd_msg == cmd_msg), None)
         if dup_cmd != None:
-            print('Skipping already running command.')
+            log(syslog.LOG_INFO, 'Skipping already running command.')
             return None
 
     cmd_rowid = insert_command(cmd_msg)
@@ -3381,7 +3286,7 @@ def authenticate (cmd_info):
 
     #print (user, passwd)
     if not auth_calcs(user, passwd):
-        print('Bad Password')
+        log(syslog.LOG_WARNING, 'Bad Password')
         return '"INVALID"'
     else:
         return '"VALID"'
@@ -3413,7 +3318,8 @@ def read_pw_hash(user):
 def calc_passwd_hash(password, existing_hash):
     # return calculated hash
     try:
-       return subprocess.run(['perl', '-e', f"print crypt('{password}', '{existing_hash}')"], capture_output=True, text=True).stdout
+        #return subprocess.run(['perl', '-e', f"print crypt('{password}', '{existing_hash}')"], capture_output=True, text=True).stdout
+        return subprocess.run(['perl', 'scripts/perl-crypt.pl', password, existing_hash], capture_output=True, text=True).stdout
     except:
         return None
 
@@ -3559,7 +3465,7 @@ def get_last_jobs_stat(cmd_info):
     # ToDo add logic to get more, previous results
     # get last_rowid
 
-    print(cmd_info)
+    # print(cmd_info)
     try:
         last_rowid = int(cmd_info['cmd_args'].get('last_rowid'))
     except:
@@ -3717,6 +3623,8 @@ def log(level, msg):
    #print level, msg
    #print journal_log.getEffectiveLevel()
    journal_log.log(levels[level], "IIAB-CMDSRV : " + msg)
+   if daemon_mode == False:
+       tprint(msg)
 
 def cmd_success(cmd):
    return (cmd_success_msg(cmd, ""))
@@ -3746,12 +3654,12 @@ def insert_command(cmd_msg):
     finally:
         lock.release() # release lock, no matter what
 
-    now = datetime.now()
+    sql_now = datetime.now().isoformat()
 
     db_lock.acquire()
     try:
         conn = sqlite3.connect(cmdsrv_dbpath)
-        conn.execute ("INSERT INTO commands (rowid, cmd_msg, create_datetime) VALUES (?,?,?)", (cmd_id, cmd_msg, now))
+        conn.execute ("INSERT INTO commands (rowid, cmd_msg, create_datetime) VALUES (?,?,?)", (cmd_id, cmd_msg, sql_now))
         conn.commit()
         conn.close()
     except sqlite3.Error as e:
@@ -3766,7 +3674,7 @@ def insert_command(cmd_msg):
 
 def insert_job(job_id, cmd_rowid, job_command, opt_args_json, cmd_step_no, depend_on_job_id, has_dependent):
     #print "in insert job"
-    now = datetime.now()
+    sql_now = datetime.now().isoformat()
     job_pid=0
     job_output=""
     job_status="SCHEDULED"
@@ -3775,7 +3683,7 @@ def insert_job(job_id, cmd_rowid, job_command, opt_args_json, cmd_step_no, depen
     try:
         conn = sqlite3.connect(cmdsrv_dbpath)
         conn.execute ("INSERT INTO jobs (rowid, cmd_rowid, cmd_step_no, depend_on_job_id, has_dependent, job_command, opt_args_json, job_pid, job_output, job_status, create_datetime, last_update_datetime) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                      (job_id, cmd_rowid, cmd_step_no, depend_on_job_id, has_dependent, job_command, opt_args_json, job_pid, job_output, job_status, now, now))
+                      (job_id, cmd_rowid, cmd_step_no, depend_on_job_id, has_dependent, job_command, opt_args_json, job_pid, job_output, job_status, sql_now, sql_now))
 
         conn.commit()
         conn.close()
@@ -3789,11 +3697,11 @@ def insert_job(job_id, cmd_rowid, job_command, opt_args_json, cmd_step_no, depen
 
 def upd_job_started(job_id, job_pid, job_status="STARTED"):
 
-    now = datetime.now()
+    sql_now = datetime.now().isoformat()
     db_lock.acquire()
     try:
         conn = sqlite3.connect(cmdsrv_dbpath)
-        conn.execute ("UPDATE jobs SET job_pid = ?, job_status = ?, last_update_datetime = ? WHERE rowid = ?", (job_pid, job_status, now, job_id))
+        conn.execute ("UPDATE jobs SET job_pid = ?, job_status = ?, last_update_datetime = ? WHERE rowid = ?", (job_pid, job_status, sql_now, job_id))
         conn.commit()
         conn.close()
     except sqlite3.Error as e:
@@ -3806,11 +3714,11 @@ def upd_job_started(job_id, job_pid, job_status="STARTED"):
 
 def upd_job_finished(job_id, job_output, job_status="FINISHED"):
 
-    now = datetime.now()
+    sql_now = datetime.now().isoformat()
     db_lock.acquire()
     try:
         conn = sqlite3.connect(cmdsrv_dbpath)
-        conn.execute ("UPDATE jobs SET job_status = ?, job_output = ?, last_update_datetime = ? WHERE rowid = ?", (job_status, job_output, now, job_id))
+        conn.execute ("UPDATE jobs SET job_status = ?, job_output = ?, last_update_datetime = ? WHERE rowid = ?", (job_status, job_output, sql_now, job_id))
         conn.commit()
         conn.close()
     except sqlite3.Error as e:
@@ -3823,11 +3731,11 @@ def upd_job_finished(job_id, job_output, job_status="FINISHED"):
 
 def upd_job_cancelled(job_id, job_status="CANCELLED"):
 
-    now = datetime.now()
+    sql_now = datetime.now().isoformat()
     db_lock.acquire()
     try:
         conn = sqlite3.connect(cmdsrv_dbpath)
-        conn.execute ("UPDATE jobs SET job_status = ?, last_update_datetime = ? WHERE rowid = ?", (job_status, now, job_id))
+        conn.execute ("UPDATE jobs SET job_status = ?, last_update_datetime = ? WHERE rowid = ?", (job_status, sql_now, job_id))
         conn.commit()
         conn.close()
     except sqlite3.Error as e:
@@ -3849,13 +3757,6 @@ def get_job_id():
         lock.release() # release lock, no matter what
 
     return(job_id)
-
-def escape_html(text):
-    """escape strings for display in HTML"""
-    return cgi.escape(text, quote=True).\
-           replace('\n', '<br />').\
-           replace('\t', '&emsp;').\
-           replace('  ', ' &nbsp;')
 
 def init():
     global last_command_rowid
@@ -3967,39 +3868,6 @@ def read_iiab_default_vars():
     global default_vars
     vars_dict = adm.read_yaml(iiab_repo + "/vars/default_vars.yml")
     default_vars = adm.jinja2_subst(vars_dict)
-
-def OBSOL_read_iiab_vars():
-    # retain for alternate ansible variable logic
-    # assumes default_vars was read in init()
-    # and role status
-    global default_vars
-    global local_vars
-    global effective_vars
-
-    default_vars = adm.read_yaml(iiab_repo + "/vars/default_vars.yml")
-    local_vars = adm.read_yaml(iiab_local_vars_file)
-
-    if local_vars == None:
-        local_vars = {}
-
-    # combine vars with local taking precedence
-    # exclude derived vars marked by {
-
-    for key in default_vars:
-        if isinstance(default_vars[key], str):
-            findpos = default_vars[key].find("{")
-            if findpos == -1:
-                effective_vars[key] = default_vars[key]
-        else:
-            effective_vars[key] = default_vars[key]
-
-    for key in local_vars:
-        if isinstance(local_vars[key], str):
-            findpos = local_vars[key].find("{")
-            if findpos == -1:
-                effective_vars[key] = local_vars[key]
-        else:
-            effective_vars[key] = local_vars[key]
 
 def get_ansible_facts():
     global ansible_facts
@@ -4123,7 +3991,8 @@ def get_incomplete_jobs():
     for row in cur.fetchall():
         job_id, cmd_rowid, cmd_step_no, depend_on_job_id, has_dependent, job_command, opt_args_json, job_pid, job_output, job_status, create_datetime, cmd_msg = row
 
-        job_created_time = datetime.strptime(create_datetime, "%Y-%m-%d %H:%M:%S.%f") # create_datetime to datetime type
+        # job_created_time = datetime.strptime(create_datetime, "%Y-%m-%d %H:%M:%S.%f") # create_datetime to datetime type
+        job_created_time = datetime.fromisoformat(create_datetime) # create_datetime to datetime type
 
         # Kill any jobs hanging around. In future we might try to monitor them since we have the job_output.
         # But make sure they are since last reboot or might not be ours

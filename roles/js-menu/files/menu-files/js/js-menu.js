@@ -117,7 +117,13 @@ var getMenuJson = $.ajax({
     })
 
 // get name to instance index for zim files
-var getZimVersions = $.getJSON(zimVersionIdx)
+var getZimVersions = $.ajax({
+      dataType: "json",
+      url: zimVersionIdx,
+      headers: {
+      'Cache-Control': 'no-cache'
+      }
+    })
     .done(function (data) {
         //consoleLog(data);
         zimVersions = data;
@@ -130,7 +136,13 @@ var getZimVersions = $.getJSON(zimVersionIdx)
     })
 
 // get name to instance index for osm files
-var getOsmVersions = $.getJSON(osmVersionIdx)
+var getOsmVersions = $.ajax({
+      dataType: "json",
+      url: osmVersionIdx,
+      headers: {
+      'Cache-Control': 'no-cache'
+      }
+    })
     .done(function (data) {
         //consoleLog(data);
         osmVersions = data;
