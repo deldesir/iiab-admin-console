@@ -213,7 +213,7 @@ def main():
     clients = context.socket(zmq.ROUTER)
     clients.bind(client_url)
     os.chown(ipc_sock, owner.pw_uid, group.gr_gid)
-    os.chmod(ipc_sock, 0o770)
+    os.chmod(ipc_sock, 0o700)
 
     # Socket to talk to workers
     workers_data = context.socket(zmq.DEALER)
@@ -2072,7 +2072,11 @@ def set_white_list(cmd_info):
     return (resp)
 
 def get_kiwix_catalog(cmd_info):
-    outp = subproc_check_output(["scripts/get_kiwix_catalog"])
+    try:
+        outp = subproc_check_output(["scripts/get_kiwix_catalog"])
+    except subprocess.CalledProcessError:
+        log(syslog.LOG_ERR, "Error: Failed to download Kiwix catalog.")
+        return ('{"Error": "Failed to download Kiwix catalog. Please try again after a few minutes."}')
     if outp == "SUCCESS":
         read_kiwix_catalog()
         resp = cmd_success("GET-KIWIX-CAT")
@@ -2268,11 +2272,12 @@ def run_ansible_roles(cmd_info):
         adm.write_iiab_local_vars(changed_local_vars)
 
     # assemble playbook
-    with open(iiab_repo + '/adm-run-roles-tmp.yml', 'w') as f:
-        f.writelines(lines)
+    tmp_playbook = iiab_repo + '/adm-run-roles-tmp.yml'
+    with open(tmp_playbook, 'w') as dest:
+        dest.writelines(lines)
 
     # first step run ansible
-    job_command = ansible_playbook_program + " -M " + iiab_repo + "/modules" + " -i " + iiab_repo + "/ansible_hosts " + iiab_repo + "/adm-run-roles-tmp.yml --connection=local"
+    job_command = ansible_playbook_program + " -M " + iiab_repo + "/modules" + " -i " + iiab_repo + "/ansible_hosts " + tmp_playbook + " --connection=local"
     job_id = request_one_job(cmd_info, job_command, 1, -1, "Y")
 
     # second step update home menu
@@ -3479,12 +3484,20 @@ def get_last_jobs_stat(cmd_info):
     except:
         since_days = 0
 
-    sql_cmd = "SELECT jobs.rowid, job_command, job_output, job_status, strftime('%m-%d %H:%M', jobs.create_datetime), "
-    sql_cmd += "strftime('%s', jobs.create_datetime), strftime('%s',last_update_datetime), strftime('%s','now', 'localtime'), cmd_msg "
-    sql_cmd += "FROM jobs, commands where cmd_rowid = commands.rowid AND jobs.rowid < " + str(last_rowid)
+    job_cols = "jobs.rowid, job_command, job_output, job_status, strftime('%m-%d %H:%M', jobs.create_datetime), "
+    job_cols += "strftime('%s', jobs.create_datetime), strftime('%s',last_update_datetime), strftime('%s','now', 'localtime'), cmd_msg "
+
+    # recent page of jobs, newest first
+    sql_cmd = "SELECT " + job_cols + "FROM jobs, commands where cmd_rowid = commands.rowid AND jobs.rowid < " + str(last_rowid)
     if since_days > 0:
         sql_cmd += " AND jobs.create_datetime >= datetime('now', '-" + str(since_days) + " days', 'localtime')"
     sql_cmd += " ORDER BY jobs.rowid DESC LIMIT 50"
+
+    # always include jobs currently running, even if older than the page above
+    sql_cmd = "SELECT * FROM (" + sql_cmd + ") "
+    sql_cmd += "UNION SELECT " + job_cols
+    sql_cmd += "FROM jobs, commands where cmd_rowid = commands.rowid AND job_status IN ('STARTED', 'RESTARTED') "
+    sql_cmd += "ORDER BY 1 DESC"
 
     db_lock.acquire() # will block if lock is already held
     try:
