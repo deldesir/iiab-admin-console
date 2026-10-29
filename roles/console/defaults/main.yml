@@ -1,0 +1,11 @@
+---
+# Networks allowed to reach the Admin Console (/admin) and its command service
+# (/iiab-cmd-service), as nginx allow rules. Empty (the default) keeps the console reachable
+# from anywhere, as upstream ships it. On a box with a public address, set it in
+# /etc/iiab/local_vars.yml to the networks you administer from, e.g. the VPN range and the
+# box itself, and rerun ./install: the command service runs as root behind one password and
+# has no business answering the whole internet.
+#   adm_cons_allow_from:
+#     - 127.0.0.1
+#     - 100.64.0.0/10
+adm_cons_allow_from: []

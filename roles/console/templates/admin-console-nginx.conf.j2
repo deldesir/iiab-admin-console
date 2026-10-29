@@ -1,8 +1,19 @@
+{#- Access list for the console and its command service: see roles/console/defaults/main.yml -#}
+{%- macro access() -%}
+{%- for net in adm_cons_allow_from %}
+   allow {{ net }};
+{%- endfor %}
+{%- if adm_cons_allow_from %}
+   deny all;
+{%- endif -%}
+{%- endmacro -%}
 location /admin {
+{{- access() }}
    alias {{ admin_console_dir }};
 }
 
 location ~ ^/admin/(.*)\.php$ {
+{{- access() }}
     alias {{ admin_console_dir }}/$1.php;
     proxy_set_header X-Real-IP  $remote_addr;
     proxy_set_header X-Forwarded-For $remote_addr;
@@ -16,6 +27,7 @@ location ~ ^/admin/(.*)\.php$ {
 }
 
 location /iiab-cmd-service {
+{{- access() }}
    include uwsgi_params;
    uwsgi_pass unix:///run/uwsgi/admin-console.socket;
    uwsgi_read_timeout {{ (iiab_cmd_service_timeout / 1000 + 10) | int }}s;
