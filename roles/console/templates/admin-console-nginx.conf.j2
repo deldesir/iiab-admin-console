@@ -1,10 +1,12 @@
-{#- Access list for the console and its command service: see roles/console/defaults/main.yml -#}
+{#- Access list for the console and its command service: see roles/console/defaults/main.yml.
+    The newlines are emitted explicitly so the file renders one directive per line under
+    Ansible's template defaults (trim_blocks) as well as plain Jinja. -#}
 {%- macro access() -%}
-{%- for net in adm_cons_allow_from %}
-   allow {{ net }};
-{%- endfor %}
-{%- if adm_cons_allow_from %}
-   deny all;
+{%- for net in adm_cons_allow_from -%}
+{{ "\n   allow " ~ net ~ ";" }}
+{%- endfor -%}
+{%- if adm_cons_allow_from -%}
+{{ "\n   deny all;" }}
 {%- endif -%}
 {%- endmacro -%}
 location /admin {
